@@ -79,7 +79,7 @@ interface Invoice {
   subtotal?: number;
   tax?: number;
   discount?: number;
-  status: 'draft' | 'posted' | 'cancelled' | 'paid' | 'partially_paid' | 'overdue';
+  status: 'draft' | 'posted' | 'cancelled' | 'paid' | 'partially_paid' | 'overdue' | string;
   active?: boolean;
   created_at: string;
   updated_at?: string;
@@ -359,7 +359,7 @@ function ClientSideConsultarFacturas() {
             <Button 
               variant="outline" 
               size="sm" 
-              onClick={fetchPurchaseInvoices}
+              onClick={handleSearch}
               disabled={searching}
             >
               {searching ? (
@@ -384,11 +384,8 @@ function ClientSideConsultarFacturas() {
                 <TableRow>
                   <TableHead className="w-[120px]">Número</TableHead>
                   <TableHead className="w-[100px]">Fecha</TableHead>
-                  <TableHead className="w-[120px]">Vencimiento</TableHead>
                   <TableHead>Proveedor</TableHead>
-                  <TableHead className="text-right w-[120px]">Subtotal</TableHead>
                   <TableHead className="text-right w-[100px]">Impuestos</TableHead>
-                  <TableHead className="text-right w-[100px]">Descuentos</TableHead>
                   <TableHead className="text-right w-[130px] font-bold">Total</TableHead>
                   <TableHead className="w-[140px]">Estado</TableHead>
                   <TableHead className="w-[80px] text-right">Acciones</TableHead>
@@ -413,11 +410,6 @@ function ClientSideConsultarFacturas() {
                           : 'N/A'}
                       </TableCell>
                       <TableCell>
-                        {invoice.due_date 
-                          ? format(new Date(invoice.due_date), 'dd/MM/yyyy', { locale: es })
-                          : 'N/A'}
-                      </TableCell>
-                      <TableCell>
                         <div className="flex flex-col">
                           <span className="font-medium">{invoice.customer?.name || 'Sin nombre'}</span>
                           <div className="flex items-center space-x-2 text-xs text-muted-foreground">
@@ -430,26 +422,14 @@ function ClientSideConsultarFacturas() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        {new Intl.NumberFormat('es-CO', {
-                          style: 'currency',
-                          currency: invoice.currency?.code || 'COP',
-                        }).format(invoice.subtotal || 0)}
-                      </TableCell>
+                      
                       <TableCell className="text-right">
                         {new Intl.NumberFormat('es-CO', {
                           style: 'currency',
                           currency: invoice.currency?.code || 'COP',
                         }).format(invoice.tax || 0)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        {invoice.discount 
-                          ? new Intl.NumberFormat('es-CO', {
-                              style: 'currency',
-                              currency: invoice.currency?.code || 'COP',
-                            }).format(invoice.discount || 0)
-                          : '-'}
-                      </TableCell>
+                      
                       <TableCell className="text-right font-semibold">
                         {new Intl.NumberFormat('es-CO', {
                           style: 'currency',
@@ -507,63 +487,114 @@ function ClientSideConsultarFacturas() {
         includeDependencies: 'true'
       });
       
-      // Usar el endpoint de documents para facturas de compra
+      // Usar el endpoint de documents
       const endpoint = `/api/siigo/documents`;
-      const response = await fetchWithAuth(`${endpoint}?${params.toString()}`);
+      const result = await fetchWithAuth(`${endpoint}?${params.toString()}`);
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Error response:', errorText);
-        throw new Error('Error al buscar tipos de documento');
-      }
-      
-      const result = await response.json();
-      
-      if (!result.success) {
+      if (!result || result.success === false) {
         console.error('Error in response:', result);
-        throw new Error(result.error || 'Error al procesar la respuesta');
+        throw new Error(result?.error || 'Error al procesar la respuesta');
       }
       
-      console.log('Document types response:', result);
-      
-      // Transform the document types into the expected format
-      const formattedInvoices = result.data.map((doc: any) => ({
-        id: doc.id.toString(),
-        number: doc.code,
-        name: doc.name,
-        description: doc.description,
-        type: doc.type,
-        active: doc.active,
-        automatic_number: doc.automatic_number,
-        consecutive: doc.consecutive,
-        document_type: {
-          id: doc.id.toString(),
-          name: doc.name,
-          code: doc.code
-        },
-        metadata: {
-          description: doc.description,
-          cost_center: doc.cost_center,
-          cost_center_mandatory: doc.cost_center_mandatory,
+      const raw = result.data || [];
+      const documents: any[] = Array.isArray(raw) ? raw : (raw.results || []);
+      const formattedInvoices: Invoice[] = documents.map((doc: any) => {
+        const docType = doc.type || doc?.document_type?.code || selectedType;
+        const party = doc.customer || doc.supplier || doc.third || doc.payer || {};
+        const currency = doc.currency || {};
+        
+        const items: InvoiceItem[] = Array.isArray(doc.items)
+          ? doc.items.map((item: any): InvoiceItem => ({
+              id: String(item.id ?? Math.random().toString(36).slice(2)),
+              code: item.code || item.sku || item.product_code || item?.account?.code || '',
+              description: item.description || item.name || 'Producto sin descripción',
+              quantity: typeof item.quantity !== 'undefined' ? Number(item.quantity) : 1,
+              price: Number(item.price ?? item.value ?? 0),
+              total: Number(
+                item.total ?? item.value ?? (Number(item.quantity || 1) * Number(item.price || 0))
+              ),
+              tax: Number(item.tax ?? 0),
+              discount: Number(item.discount ?? 0),
+            }))
+          : ([] as InvoiceItem[]);
+        
+        const payments: Payment[] = Array.isArray(doc.payments)
+          ? doc.payments.map((p: any): Payment => ({
+              id: String(p.id ?? Math.random().toString(36).slice(2)),
+              method: p.method || p.payment_method || p.payment_mean?.name || 'No especificado',
+              value: Number(p.value ?? p.amount ?? 0),
+              due_date: p.due_date || p.payment_due_date || p.date || '',
+              status: p.status || 'pending',
+            }))
+          : ([] as Payment[]);
+        
+        const isRP = String(docType).toUpperCase() === 'RP';
+        const itemsSum: number = items.reduce((sum: number, it: InvoiceItem) => sum + (Number(it.total) || 0), 0);
+        const paymentsSum: number = payments.reduce((sum: number, pay: Payment) => sum + (Number(pay.value) || 0), 0);
+        
+        let computedTotal: number;
+        if (doc.total !== undefined && doc.total !== null) {
+          computedTotal = Number(doc.total);
+        } else if (isRP) {
+          if (doc.amount !== undefined && doc.amount !== null) {
+            computedTotal = Number(doc.amount);
+          } else if (doc.value !== undefined && doc.value !== null) {
+            computedTotal = Number(doc.value);
+          } else if (itemsSum > 0) {
+            computedTotal = itemsSum;
+          } else {
+            computedTotal = paymentsSum;
+          }
+        } else {
+          computedTotal = 0;
+        }
+        
+        const computedSubtotal: number =
+          doc.subtotal !== undefined && doc.subtotal !== null
+            ? Number(doc.subtotal)
+            : (isRP ? computedTotal : 0);
+          
+          return {
+            id: String(doc.id ?? Math.random().toString(36).slice(2)),
+            number: String(doc.number ?? doc.code ?? doc.consecutive ?? 'N/A'),
+            date: doc.date || doc.issue_date || doc.created_at || new Date().toISOString(),
+            due_date: doc.due_date || doc.expiration_date || doc.payment_due_date || '',
+            customer: {
+              id: String(party.id ?? ''),
+              name: party.name || doc.customer_name || doc.supplier?.name || doc.payer?.name || 'Cliente no especificado',
+              identification: party.identification || party.identification_number || doc.customer_identification || '',
+              email: party.email || doc.customer_email || '',
+              phone: party.phone || doc.customer_phone || '',
+              address: party.address || doc.customer_address || ''
+            },
+            type: docType,
+          total: Math.abs(computedTotal || 0),
+          subtotal: Math.abs(computedSubtotal || 0),
+          tax: Math.abs(Number(isRP ? 0 : (doc.tax ?? 0))),
+          discount: Math.abs(Number(doc.discount ?? 0)),
+            status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
+            created_at: doc.created_at || new Date().toISOString(),
+            updated_at: doc.updated_at || undefined,
+            items,
+            payments,
+          document_type: doc.document_type ? {
+            id: String(doc.document_type.id ?? docType),
+            name: doc.document_type.name || (docType === 'RP' ? 'Recibo de Pago' : 'Factura'),
+            code: doc.document_type.code || docType
+          } : {
+            id: docType,
+            name: docType === 'RP' ? 'Recibo de Pago' : 'Factura',
+            code: docType
+          },
+          currency: {
+            code: currency.code || 'COP',
+            symbol: currency.symbol || '$'
+          },
           automatic_number: doc.automatic_number,
           consecutive: doc.consecutive,
-          decimals: doc.decimals,
-          consumption_tax: doc.consumption_tax,
-          reteiva: doc.reteiva,
-          reteica: doc.reteica,
-          document_support: doc.document_support
-        },
-        // Add required Invoice interface fields with default values
-        date: new Date().toISOString(),
-        customer: {
-          id: 'system',
-          name: 'Sistema Siigo',
-          identification: 'N/A'
-        },
-        total: 0,
-        status: doc.active ? 'posted' : 'draft',
-        created_at: new Date().toISOString()
-      }));
+          metadata: doc.metadata || {}
+        };
+      });
       
       setInvoices(formattedInvoices);
       setSearchPerformed(true);
@@ -686,7 +717,7 @@ function ClientSideConsultarFacturas() {
       {/* Invoices Table */}
       <Card className="mt-6">
         <CardHeader>
-          <CardTitle>Facturas de Compra</CardTitle>
+          <CardTitle>{documentTypes.find((t) => t.id === selectedType)?.name || 'Documentos'}</CardTitle>
         </CardHeader>
         <CardContent>
           {error && (
@@ -695,103 +726,6 @@ function ClientSideConsultarFacturas() {
             </div>
           )}
           {renderInvoicesTable()}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Resultados</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {error ? (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
-              <p className="font-medium">Error al buscar facturas</p>
-              <p className="text-sm">{error}</p>
-            </div>
-          ) : searching ? (
-            <div className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-gray-500 mb-4" />
-              <p className="text-gray-600">Buscando facturas...</p>
-            </div>
-          ) : searchPerformed && invoices.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900">No se encontraron facturas</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                No hay facturas que coincidan con los criterios de búsqueda.
-              </p>
-            </div>
-          ) : searchPerformed ? (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Código</TableHead>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>Descripción</TableHead>
-                    <TableHead>Tipo</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Automático</TableHead>
-                    <TableHead>Consecutivo</TableHead>
-                    <TableHead className="w-[50px]">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.map((invoice) => {
-                    const metadata = invoice.metadata || {};
-                    return (
-                      <TableRow key={invoice.id} className="hover:bg-gray-50">
-                        <TableCell className="font-medium">
-                          {invoice.code || 'N/A'}
-                        </TableCell>
-                        <TableCell>
-                          {invoice.name || 'N/A'}
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate">
-                          {typeof metadata.description === 'string' ? metadata.description : 'Sin descripción'}
-                        </TableCell>
-                        <TableCell>
-                          {invoice.type}
-                        </TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                            invoice.active ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {invoice.active ? 'Activo' : 'Inactivo'}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          {metadata.automatic_number ? 'Sí' : 'No'}
-                        </TableCell>
-                        <TableCell>
-                          {typeof metadata.consecutive === 'number' ? metadata.consecutive : 'N/A'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            onClick={() => handleViewInvoice(invoice)}
-                            title="Ver detalles"
-                            className="hover:bg-gray-100"
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <Search className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-              <h3 className="text-lg font-medium text-gray-900">Buscar facturas</h3>
-              <p className="mt-1 text-sm text-gray-500">
-                Utiliza los filtros de arriba para buscar facturas.
-              </p>
-            </div>
-          )}
         </CardContent>
       </Card>
 
@@ -855,11 +789,6 @@ function ClientSideConsultarFacturas() {
                           {formatDate(selectedInvoice.date)}
                         </span>
                       </div>
-                      {selectedInvoice.due_date && (
-                        <div className="flex justify-between">
-                          <span className="text-sm text-muted-foreground">Vencimiento:</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -919,11 +848,6 @@ function ClientSideConsultarFacturas() {
                     {/* Resumen */}
                     <div className="border-t bg-gray-50 p-4">
                       <div className="space-y-2">
-                        <div className="flex justify-between">
-                          <span>Subtotal:</span>
-                          <span>{formatCurrency(selectedInvoice.subtotal || selectedInvoice.total, selectedInvoice.currency?.code)}</span>
-                        </div>
-                        
                         {selectedInvoice.discount && selectedInvoice.discount > 0 && (
                           <div className="flex justify-between">
                             <span>Descuento:</span>
@@ -952,7 +876,6 @@ function ClientSideConsultarFacturas() {
 
               <DialogFooter className="border-t pt-4">
                 <Button variant="outline" onClick={closeViewer}>Cerrar</Button>
-                <Button>Descargar PDF</Button>
               </DialogFooter>
             </>
           )}
