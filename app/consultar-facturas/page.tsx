@@ -69,16 +69,22 @@ interface Invoice {
   description?: string;
   date: string;
   due_date?: string;
-  customer: Customer;
+  customer?: Customer;
+  supplier?: {
+    id?: string;
+    name?: string;
+    identification?: string;
+    branch_office?: string;
+  };
   seller?: {
     id: string;
     name: string;
   };
   type: string;
-  total: number;
-  subtotal?: number;
-  tax?: number;
-  discount?: number;
+  total: number | string;
+  tax?: number | string;
+  discount?: number | string;
+  discount_type?: string;
   status: 'draft' | 'posted' | 'cancelled' | 'paid' | 'partially_paid' | 'overdue' | string;
   active?: boolean;
   created_at: string;
@@ -90,12 +96,21 @@ interface Invoice {
     name: string;
     code: string;
   };
+  document?: {
+    id: string;
+  };
   currency?: {
     code: string;
     symbol: string;
   };
   automatic_number?: boolean;
   consecutive?: number;
+  observations?: string;
+  balance?: number | string;
+  provider_invoice?: {
+    prefix?: string;
+    number?: string;
+  };
   metadata?: {
     description?: string;
     cost_center?: boolean;
@@ -109,7 +124,28 @@ interface Invoice {
     document_support?: boolean;
     [key: string]: unknown;
   };
+  [key: string]: any; // For any additional properties
 }
+
+// Helper function to get status information
+const getStatusInfo = (status: string) => {
+  switch (status?.toLowerCase()) {
+    case 'draft':
+      return { variant: 'outline' as const, text: 'Borrador' };
+    case 'posted':
+      return { variant: 'default' as const, text: 'Publicada' };
+    case 'cancelled':
+      return { variant: 'destructive' as const, text: 'Anulada' };
+    case 'paid':
+      return { variant: 'success' as const, text: 'Pagada' };
+    case 'partially_paid':
+      return { variant: 'warning' as const, text: 'Parcialmente Pagada' };
+    case 'overdue':
+      return { variant: 'destructive' as const, text: 'Vencida' };
+    default:
+      return { variant: 'outline' as const, text: status || 'Desconocido' };
+  }
+};
 
 // Server component wrapper
 export default function ConsultarFacturas() {
@@ -262,7 +298,6 @@ function ClientSideConsultarFacturas() {
         } : undefined,
         type: invoice.type || 'FC',
         total: parseFloat(invoice.total) || 0,
-        subtotal: parseFloat(invoice.subtotal) || 0,
         tax: parseFloat(invoice.tax) || 0,
         discount: parseFloat(invoice.discount) || 0,
         status: (invoice.status || 'draft').toLowerCase(),
@@ -377,95 +412,148 @@ function ClientSideConsultarFacturas() {
           </div>
         </div>
         
-        <div className="border rounded-md overflow-hidden">
+        {/* Desktop Table View */}
+        <div className="hidden md:block border rounded-md overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader className="bg-muted/50">
+              <TableHeader>
                 <TableRow>
-                  <TableHead className="w-[120px]">Número</TableHead>
-                  <TableHead className="w-[100px]">Fecha</TableHead>
-                  <TableHead>Proveedor</TableHead>
-                  <TableHead className="text-right w-[100px]">Impuestos</TableHead>
-                  <TableHead className="text-right w-[130px] font-bold">Total</TableHead>
-                  <TableHead className="w-[140px]">Estado</TableHead>
-                  <TableHead className="w-[80px] text-right">Acciones</TableHead>
+                  <TableHead># Factura</TableHead>
+                  <TableHead>Fecha</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead className="text-right">Impuestos</TableHead>
+                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {invoices.map((invoice) => {
-                  const statusInfo = getStatusInfo(invoice.status);
-                  return (
-                    <TableRow key={invoice.id} className="hover:bg-muted/50">
-                      <TableCell className="font-medium">
-                        <div className="flex flex-col">
-                          <span className="font-semibold">{invoice.number || 'N/A'}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {invoice.document_type?.name || 'Factura'}
-                          </span>
+                {invoices.map((invoice) => (
+                  <TableRow key={invoice.id}>
+                    <TableCell className="font-medium">
+                      <div className="flex flex-col">
+                        <span>{invoice.number || 'N/A'}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {invoice.document_type?.name || 'Factura'}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {invoice.date 
+                        ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es })
+                        : 'N/A'}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{invoice.customer?.name || 'Sin nombre'}</span>
+                        <div className="flex items-center space-x-2 text-xs text-muted-foreground">
+                          {invoice.customer?.identification && (
+                            <span>{invoice.customer.identification}</span>
+                          )}
+                          {invoice.customer?.email && (
+                            <span>• {invoice.customer.email}</span>
+                          )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        {invoice.date 
-                          ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es })
-                          : 'N/A'}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{invoice.customer?.name || 'Sin nombre'}</span>
-                          <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                            {invoice.customer?.identification && (
-                              <span>{invoice.customer.identification}</span>
-                            )}
-                            {invoice.customer?.email && (
-                              <span>• {invoice.customer.email}</span>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      
-                      <TableCell className="text-right">
-                        {new Intl.NumberFormat('es-CO', {
-                          style: 'currency',
-                          currency: invoice.currency?.code || 'COP',
-                        }).format(invoice.tax || 0)}
-                      </TableCell>
-                      
-                      <TableCell className="text-right font-semibold">
-                        {new Intl.NumberFormat('es-CO', {
-                          style: 'currency',
-                          currency: invoice.currency?.code || 'COP',
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2
-                        }).format(invoice.total || 0)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={statusInfo.variant} className="whitespace-nowrap">
-                          {statusInfo.text}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8"
-                            onClick={() => {
-                              setSelectedInvoice(invoice);
-                              setIsViewerOpen(true);
-                            }}
-                            title="Ver detalles"
-                          >
-                            <Eye className="h-4 w-4" />
-                            <span className="sr-only">Ver detalles</span>
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {invoice.tax ? `$${Math.round(Number(invoice.tax)).toLocaleString('es-CO')}` : '$0'}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={getStatusInfo(invoice.status).variant} className="whitespace-nowrap">
+                        {getStatusInfo(invoice.status).text}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
+                        onClick={() => {
+                          setSelectedInvoice(invoice);
+                          setIsViewerOpen(true);
+                        }}
+                        title="Ver detalles de la factura"
+                      >
+                        <Eye className="h-4 w-4 group-hover:scale-110 transition-transform" />
+                        <span className="sr-only">Ver detalles de la factura</span>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           </div>
+        </div>
+        
+        {/* Mobile Card View */}
+        <div className="md:hidden space-y-3">
+          {invoices.map((invoice) => {
+            const statusInfo = getStatusInfo(invoice.status);
+            return (
+              <Card key={invoice.id} className="overflow-hidden">
+                <CardHeader className="p-4 pb-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="font-medium">
+                        {invoice.number || 'N/A'}
+                        <span className="ml-2 text-sm text-muted-foreground">
+                          {invoice.document_type?.name || 'Factura'}
+                        </span>
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        {invoice.date ? format(new Date(invoice.date), 'dd/MM/yyyy', { locale: es }) : 'N/A'}
+                      </p>
+                    </div>
+                    <Badge variant={statusInfo.variant} className="whitespace-nowrap">
+                      {statusInfo.text}
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="p-4 pt-0">
+                  <div className="space-y-2">
+                    <div>
+                      <p className="font-medium">{invoice.customer?.name || 'Sin nombre'}</p>
+                      {invoice.customer?.identification && (
+                        <p className="text-sm text-muted-foreground">
+                          {invoice.customer.identification}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex justify-between items-center pt-2 border-t">
+                      <div>
+                        <p className="text-sm text-muted-foreground">Impuestos</p>
+                        <p>{invoice.tax ? `$${Math.round(Number(invoice.tax)).toLocaleString('es-CO')}` : '$0'}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-muted-foreground">Total</p>
+                        <p className="font-semibold">
+                          {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="pt-3">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setSelectedInvoice(invoice);
+                          setIsViewerOpen(true);
+                        }}
+                        className="w-full bg-primary/5 hover:bg-primary/10 text-primary border-primary/20 hover:border-primary/30 transition-colors group"
+                      >
+                        <Eye className="h-4 w-4 mr-2 group-hover:scale-110 transition-transform" />
+                        <span className="group-hover:translate-x-0.5 transition-transform">Ver detalles</span>
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       </div>
     );
@@ -549,11 +637,6 @@ function ClientSideConsultarFacturas() {
           computedTotal = 0;
         }
         
-        const computedSubtotal: number =
-          doc.subtotal !== undefined && doc.subtotal !== null
-            ? Number(doc.subtotal)
-            : (isRP ? computedTotal : 0);
-          
           return {
             id: String(doc.id ?? Math.random().toString(36).slice(2)),
             number: String(doc.number ?? doc.code ?? doc.consecutive ?? 'N/A'),
@@ -569,7 +652,6 @@ function ClientSideConsultarFacturas() {
             },
             type: docType,
           total: Math.abs(computedTotal || 0),
-          subtotal: Math.abs(computedSubtotal || 0),
           tax: Math.abs(Number(isRP ? 0 : (doc.tax ?? 0))),
           discount: Math.abs(Number(doc.discount ?? 0)),
             status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
@@ -607,19 +689,25 @@ function ClientSideConsultarFacturas() {
   }, [authLoading, fetchWithAuth, selectedType]);
 
   const formatCurrency = (value: number, currency: string = 'COP') => {
-    const formatter = new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: currency,
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    });
+    // Format the number with 2 decimal places first
+    let formatted = value.toFixed(2);
     
-    // Remove the currency symbol if it's not needed
+    // Remove trailing zeros and optional decimal point
+    formatted = formatted.replace(/\.?0+$/, '');
+    
+    // Add thousand separators
+    const parts = formatted.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    
+    formatted = parts.join('.');
+    
+    // Add currency symbol for COP
     if (currency === 'COP') {
-      return formatter.format(value).replace('$', '').trim();
+      return `$${formatted}`;
     }
     
-    return formatter.format(value);
+    // For other currencies, use the formatted value with currency code
+    return `${formatted} ${currency}`;
   };
   
   const formatDate = (dateString: string, includeTime: boolean = false) => {
@@ -735,105 +823,148 @@ function ClientSideConsultarFacturas() {
           {selectedInvoice && (
             <>
               <DialogHeader className="border-b pb-4">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <DialogTitle className="text-2xl">
-                      {selectedInvoice.document_type?.name || 'Factura'} #{selectedInvoice.number}
-                    </DialogTitle>
-                    <DialogDescription>
-                      {formatDate(selectedInvoice.date)}
-                    </DialogDescription>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-2xl font-bold">
-                      {formatCurrency(selectedInvoice.total, selectedInvoice.currency?.code)}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <DialogTitle className="text-2xl">
+                        {selectedInvoice.document_type?.name || 'Factura'} #{selectedInvoice.number}
+                        {selectedInvoice.name && ` (${selectedInvoice.name})`}
+                      </DialogTitle>
+                      <div className="flex items-center gap-4 mt-1">
+                        <span className="text-sm text-muted-foreground">
+                          Fecha: {formatDate(selectedInvoice.date)}
+                        </span>
+                        {selectedInvoice.document?.id && (
+                          <span className="text-sm text-muted-foreground">
+                            Documento: {selectedInvoice.document.id}
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    <div className="text-right">
+                      <div className="text-2xl font-bold">
+                        {`$${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {maximumFractionDigits: 0})}`}
+                      </div>
+                      {selectedInvoice.status && (
+                        <Badge variant={selectedInvoice.status ? getStatusInfo(selectedInvoice.status).variant : 'outline'} className="mt-1">
+                          {selectedInvoice.status ? getStatusInfo(selectedInvoice.status).text : 'Sin estado'}
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {/* ID and Additional Info */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm text-muted-foreground pt-2 border-t">
+                    <div>
+                      <span className="font-medium">ID:</span> {selectedInvoice.id}
+                    </div>
+                    {selectedInvoice.balance !== undefined && (
+                      <div>
+                        <span className="font-medium">Saldo:</span>{' '}
+                        <span className={Number(selectedInvoice.balance) > 0 ? 'text-amber-600' : 'text-green-600'}>
+                          ${Number(selectedInvoice.balance).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                        </span>
+                      </div>
+                    )}
+                    {selectedInvoice.discount_type && (
+                      <div>
+                        <span className="font-medium">Tipo de descuento:</span> {selectedInvoice.discount_type}
+                      </div>
+                    )}
+                    {selectedInvoice.observations && (
+                      <div className="md:col-span-2">
+                        <span className="font-medium">Observaciones:</span> {selectedInvoice.observations}
+                      </div>
+                    )}
                   </div>
                 </div>
               </DialogHeader>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 py-6">
-                {/* Información del Cliente */}
+              <div className="space-y-6 py-4">
+                {/* Información del Proveedor */}
                 <div className="space-y-4">
-                  <div className="rounded-lg border p-4">
-                    <h3 className="font-medium mb-3 text-sm text-muted-foreground">CLIENTE</h3>
-                    <div className="space-y-2">
-                      <div>
-                        <p className="font-medium">{selectedInvoice.customer?.name || 'N/A'}</p>
-                        {selectedInvoice.customer?.identification && (
-                          <p className="text-sm text-muted-foreground">
-                            NIT/CC: {selectedInvoice.customer.identification}
-                          </p>
-                        )}
-                        {selectedInvoice.customer?.email && (
-                          <p className="text-sm text-muted-foreground">
-                            {selectedInvoice.customer.email}
-                          </p>
-                        )}
-                        {selectedInvoice.customer?.phone && (
-                          <p className="text-sm text-muted-foreground">
-                            Tel: {selectedInvoice.customer.phone}
+                  <h3 className="text-lg font-semibold">Información del Proveedor</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-3 border rounded-lg p-4 bg-gray-50">
+                      <div className="flex justify-between items-center">
+                        <h4 className="font-medium text-base">Proveedor</h4>
+                      </div>
+                      <div className="mt-2">
+                        <div className="bg-white p-3 rounded border">
+                          <div className="text-sm font-mono break-all">
+                            {selectedInvoice.supplier?.identification || selectedInvoice.supplier?.id || 'No disponible'}
+                          </div>
+                          {selectedInvoice.supplier?.id && (
+                            <div className="text-xs text-muted-foreground mt-1">
+                              ID: {selectedInvoice.supplier.id}
+                            </div>
+                          )}
+                        </div>
+                        {selectedInvoice.supplier?.branch_office !== undefined && (
+                          <p className="text-sm text-muted-foreground mt-2">
+                            <span className="font-medium">Sucursal:</span> {selectedInvoice.supplier.branch_office}
                           </p>
                         )}
                       </div>
                     </div>
-                  </div>
-
-                  {/* Información de la Factura */}
-                  <div className="rounded-lg border p-4">
-                    <h3 className="font-medium mb-3 text-sm text-muted-foreground">INFORMACIÓN</h3>
-                    <div className="space-y-3">
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">Fecha de Emisión:</span>
-                        <span className="text-sm font-medium">
-                          {formatDate(selectedInvoice.date)}
-                        </span>
+                    
+                    {selectedInvoice.provider_invoice && (
+                      <div className="space-y-2 border rounded-lg p-4">
+                        <h4 className="font-medium">Factura del Proveedor</h4>
+                        <div className="mt-2 space-y-1 text-sm">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">Número:</span>
+                            <span className="bg-gray-50 px-2 py-1 rounded">
+                              {selectedInvoice.provider_invoice.prefix || ''} {selectedInvoice.provider_invoice.number || ''}
+                            </span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 </div>
 
                 {/* Detalles de la Factura */}
-                <div className="md:col-span-2">
-                  <div className="rounded-lg border overflow-hidden">
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold">Detalles de la Factura</h3>
+                  <div className="border rounded-lg overflow-hidden">
                     <div className="bg-gray-50 px-4 py-3 border-b">
                       <div className="grid grid-cols-12 gap-4">
-                        <div className="col-span-6 font-medium text-sm text-muted-foreground">
-                          Descripción
-                        </div>
-                        <div className="col-span-2 text-right font-medium text-sm text-muted-foreground">
-                          Cantidad
-                        </div>
-                        <div className="col-span-2 text-right font-medium text-sm text-muted-foreground">
-                          Precio
-                        </div>
-                        <div className="col-span-2 text-right font-medium text-sm text-muted-foreground">
-                          Total
-                        </div>
+                        <div className="col-span-5 font-medium text-sm">Artículo</div>
+                        <div className="col-span-2 text-right font-medium text-sm">Cantidad</div>
+                        <div className="col-span-2 text-right font-medium text-sm">Precio Unit.</div>
+                        <div className="col-span-3 text-right font-medium text-sm">Total</div>
                       </div>
                     </div>
                     
                     <div className="divide-y">
                       {selectedInvoice.items?.length ? (
-                        selectedInvoice.items.map((item) => (
+                        selectedInvoice.items.map((item: any) => (
                           <div key={item.id} className="px-4 py-3 hover:bg-gray-50">
                             <div className="grid grid-cols-12 gap-4 items-center">
-                              <div className="col-span-6">
-                                <div className="font-medium">{item.description}</div>
-                                {item.code && (
-                                  <div className="text-xs text-muted-foreground">
-                                    Código: {item.code}
-                                  </div>
-                                )}
+                              <div className="col-span-5">
+                                <div className="font-medium">{item.description || 'Sin descripción'}</div>
+                                <div className="flex flex-wrap gap-2 mt-1">
+                                  {item.code && (
+                                    <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
+                                      Código: {item.code}
+                                    </span>
+                                  )}
+                                  {item.type && (
+                                    <span className="text-xs bg-gray-100 rounded px-2 py-0.5">
+                                      Tipo: {item.type}
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                               <div className="col-span-2 text-right">
                                 {item.quantity}
                               </div>
                               <div className="col-span-2 text-right">
-                                {formatCurrency(item.price, selectedInvoice.currency?.code)}
+                                {`$${Number(item.price).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
                               </div>
-                              <div className="col-span-2 text-right font-medium">
-                                {formatCurrency(item.total, selectedInvoice.currency?.code)}
+                              <div className="col-span-3 text-right font-medium">
+                                {`$${Number(item.total).toLocaleString('es-CO', {maximumFractionDigits: 2})}`}
                               </div>
                             </div>
                           </div>
@@ -844,29 +975,67 @@ function ClientSideConsultarFacturas() {
                         </div>
                       )}
                     </div>
+                  </div>
+                </div>
 
-                    {/* Resumen */}
-                    <div className="border-t bg-gray-50 p-4">
-                      <div className="space-y-2">
-                        {selectedInvoice.discount && selectedInvoice.discount > 0 && (
+                {/* Resumen y Totales */}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Información Adicional */}
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-semibold">Información Adicional</h3>
+                      <div className="space-y-2 text-sm">
+                        {selectedInvoice.observations && (
+                          <div>
+                            <p className="font-medium">Observaciones:</p>
+                            <p className="text-muted-foreground">{selectedInvoice.observations}</p>
+                          </div>
+                        )}
+                        {selectedInvoice.discount_type && (
+                          <p><span className="font-medium">Tipo de descuento:</span> {selectedInvoice.discount_type}</p>
+                        )}
+                        {selectedInvoice.balance !== undefined && (
+                          <p>
+                            <span className="font-medium">Saldo pendiente:</span>{' '}
+                            <span className={Number(selectedInvoice.balance) > 0 ? 'text-amber-600' : 'text-green-600'}>
+                              ${Number(selectedInvoice.balance).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Totales */}
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-semibold">Resumen de Valores</h3>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span>Subtotal:</span>
+                          <span>
+                            ${(Number(selectedInvoice.total || 0) - (Number(selectedInvoice.tax || 0)) - (Number(selectedInvoice.discount || 0)))
+                              .toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                          </span>
+                        </div>
+                        
+                        {selectedInvoice.discount && Number(selectedInvoice.discount) > 0 && (
                           <div className="flex justify-between">
                             <span>Descuento:</span>
                             <span className="text-red-600">
-                              -{formatCurrency(selectedInvoice.discount, selectedInvoice.currency?.code)}
+                              -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}
                             </span>
                           </div>
                         )}
                         
-                        {selectedInvoice.tax && selectedInvoice.tax > 0 && (
+                        {selectedInvoice.tax && Number(selectedInvoice.tax) > 0 && (
                           <div className="flex justify-between">
-                            <span>IVA ({(selectedInvoice.tax / (selectedInvoice.subtotal || selectedInvoice.total) * 100).toFixed(0)}%):</span>
-                            <span>{formatCurrency(selectedInvoice.tax, selectedInvoice.currency?.code)}</span>
+                            <span>Impuestos:</span>
+                            <span>${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}</span>
                           </div>
                         )}
                         
                         <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
                           <span>Total:</span>
-                          <span>{formatCurrency(selectedInvoice.total, selectedInvoice.currency?.code)}</span>
+                          <span>${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}</span>
                         </div>
                       </div>
                     </div>
