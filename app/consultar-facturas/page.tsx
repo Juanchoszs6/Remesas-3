@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { toast } from 'sonner';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useSiigoAuth } from '@/hooks/useSiigoAuth';
@@ -168,6 +171,8 @@ export default function ConsultarFacturas() {
 
 // Client component that will be dynamically imported
 function ClientSideConsultarFacturas() {
+  const router = useRouter();
+
   // Document types with their API endpoints
   const documentTypes = [
     { id: 'FC', name: 'Factura de Compra', endpoint: 'invoices' },
@@ -190,6 +195,7 @@ function ClientSideConsultarFacturas() {
     minAmount: '',
     maxAmount: ''
   });
+  const [deleting, setDeleting] = useState(false);
 
   const clearFilters = () => {
     setSelectedType('FC');
@@ -292,6 +298,15 @@ function ClientSideConsultarFacturas() {
           phone: invoice.customer?.phone || invoice.customer_phone || '',
           address: invoice.customer?.address || invoice.customer_address || ''
         },
+        // Ensure supplier is populated to support the Provider card in the viewer
+        supplier: invoice.supplier ? {
+          id: invoice.supplier.id || '',
+          name: invoice.supplier.name || invoice.supplier_name || '',
+          identification: invoice.supplier.identification || invoice.supplier_identification || '',
+          branch_office: (invoice.supplier.branch_office ?? invoice.supplier_branch_office) != null
+            ? String(invoice.supplier.branch_office ?? invoice.supplier_branch_office)
+            : undefined
+        } : undefined,
         seller: invoice.seller ? {
           id: invoice.seller.id || '',
           name: invoice.seller.name || ''
@@ -590,7 +605,7 @@ function ClientSideConsultarFacturas() {
         const docType = doc.type || doc?.document_type?.code || selectedType;
         const party = doc.customer || doc.supplier || doc.third || doc.payer || {};
         const currency = doc.currency || {};
-        
+
         const items: InvoiceItem[] = Array.isArray(doc.items)
           ? doc.items.map((item: any): InvoiceItem => ({
               id: String(item.id ?? Math.random().toString(36).slice(2)),
@@ -598,14 +613,12 @@ function ClientSideConsultarFacturas() {
               description: item.description || item.name || 'Producto sin descripción',
               quantity: typeof item.quantity !== 'undefined' ? Number(item.quantity) : 1,
               price: Number(item.price ?? item.value ?? 0),
-              total: Number(
-                item.total ?? item.value ?? (Number(item.quantity || 1) * Number(item.price || 0))
-              ),
+              total: Number(item.total ?? item.value ?? (Number(item.quantity || 1) * Number(item.price || 0))),
               tax: Number(item.tax ?? 0),
               discount: Number(item.discount ?? 0),
             }))
           : ([] as InvoiceItem[]);
-        
+
         const payments: Payment[] = Array.isArray(doc.payments)
           ? doc.payments.map((p: any): Payment => ({
               id: String(p.id ?? Math.random().toString(36).slice(2)),
@@ -615,11 +628,11 @@ function ClientSideConsultarFacturas() {
               status: p.status || 'pending',
             }))
           : ([] as Payment[]);
-        
+
         const isRP = String(docType).toUpperCase() === 'RP';
         const itemsSum: number = items.reduce((sum: number, it: InvoiceItem) => sum + (Number(it.total) || 0), 0);
         const paymentsSum: number = payments.reduce((sum: number, pay: Payment) => sum + (Number(pay.value) || 0), 0);
-        
+
         let computedTotal: number;
         if (doc.total !== undefined && doc.total !== null) {
           computedTotal = Number(doc.total);
@@ -636,45 +649,64 @@ function ClientSideConsultarFacturas() {
         } else {
           computedTotal = 0;
         }
-        
-          return {
-            id: String(doc.id ?? Math.random().toString(36).slice(2)),
-            number: String(doc.number ?? doc.code ?? doc.consecutive ?? 'N/A'),
-            date: doc.date || doc.issue_date || doc.created_at || new Date().toISOString(),
-            due_date: doc.due_date || doc.expiration_date || doc.payment_due_date || '',
-            customer: {
-              id: String(party.id ?? ''),
-              name: party.name || doc.customer_name || doc.supplier?.name || doc.payer?.name || 'Cliente no especificado',
-              identification: party.identification || party.identification_number || doc.customer_identification || '',
-              email: party.email || doc.customer_email || '',
-              phone: party.phone || doc.customer_phone || '',
-              address: party.address || doc.customer_address || ''
-            },
-            type: docType,
+
+        const supplier = doc.supplier
+          ? {
+              id: String(doc.supplier.id ?? ''),
+              name: doc.supplier.name || '',
+              identification: String(doc.supplier.identification ?? ''),
+              branch_office: doc.supplier.branch_office != null ? String(doc.supplier.branch_office) : undefined,
+            }
+          : (String(docType).toUpperCase() === 'FC'
+              ? {
+                  id: String(party.id ?? ''),
+                  name: (party as any).name || '',
+                  identification: String((party as any).identification ?? (party as any).identification_number ?? ''),
+                  branch_office: (party as any).branch_office != null ? String((party as any).branch_office) : undefined,
+                }
+              : undefined);
+
+        return {
+          id: String(doc.id ?? Math.random().toString(36).slice(2)),
+          number: String(doc.number ?? doc.code ?? doc.consecutive ?? 'N/A'),
+          date: doc.date || doc.issue_date || doc.created_at || new Date().toISOString(),
+          due_date: doc.due_date || doc.expiration_date || doc.payment_due_date || '',
+          customer: {
+            id: String((party as any).id ?? ''),
+            name: (party as any).name || doc.customer_name || doc.supplier?.name || doc.payer?.name || 'Cliente no especificado',
+            identification: (party as any).identification || (party as any).identification_number || doc.customer_identification || '',
+            email: (party as any).email || doc.customer_email || '',
+            phone: (party as any).phone || doc.customer_phone || '',
+            address: (party as any).address || doc.customer_address || '',
+          },
+          supplier,
+          type: docType,
           total: Math.abs(computedTotal || 0),
           tax: Math.abs(Number(isRP ? 0 : (doc.tax ?? 0))),
           discount: Math.abs(Number(doc.discount ?? 0)),
-            status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
-            created_at: doc.created_at || new Date().toISOString(),
-            updated_at: doc.updated_at || undefined,
-            items,
-            payments,
-          document_type: doc.document_type ? {
-            id: String(doc.document_type.id ?? docType),
-            name: doc.document_type.name || (docType === 'RP' ? 'Recibo de Pago' : 'Factura'),
-            code: doc.document_type.code || docType
-          } : {
-            id: docType,
-            name: docType === 'RP' ? 'Recibo de Pago' : 'Factura',
-            code: docType
-          },
+          status: String(doc.status || 'draft').toLowerCase() as Invoice['status'],
+          created_at: doc.created_at || new Date().toISOString(),
+          updated_at: doc.updated_at || undefined,
+          items,
+          payments,
+          document_type: doc.document_type
+            ? {
+                id: String(doc.document_type.id ?? docType),
+                name: doc.document_type.name || (docType === 'RP' ? 'Recibo de Pago' : 'Factura'),
+                code: doc.document_type.code || docType,
+              }
+            : {
+                id: docType,
+                name: docType === 'RP' ? 'Recibo de Pago' : 'Factura',
+                code: docType,
+              },
           currency: {
             code: currency.code || 'COP',
-            symbol: currency.symbol || '$'
+            symbol: currency.symbol || '$',
           },
           automatic_number: doc.automatic_number,
           consecutive: doc.consecutive,
-          metadata: doc.metadata || {}
+          metadata: doc.metadata || {},
         };
       });
       
@@ -731,6 +763,34 @@ function ClientSideConsultarFacturas() {
   const closeViewer = () => {
     setIsViewerOpen(false);
     setSelectedInvoice(null);
+  };
+
+  const goToEditSelectedInvoice = () => {
+    if (!selectedInvoice) return;
+    const t = (selectedInvoice.type || selectedInvoice.document_type?.code || selectedType || 'FC').toString();
+    router.push(`/editar-factura/${encodeURIComponent(selectedInvoice.id)}?type=${encodeURIComponent(t)}`);
+  };
+
+  const handleDeleteSelectedInvoice = async () => {
+    if (!selectedInvoice) return;
+    const t = (selectedInvoice.type || selectedInvoice.document_type?.code || selectedType || 'FC').toString();
+    if (!confirm('¿Eliminar esta factura en Siigo? Esta acción no se puede deshacer.')) return;
+    try {
+      setDeleting(true);
+      const res = await fetch(`/api/siigo/documents/${encodeURIComponent(selectedInvoice.id)}?type=${encodeURIComponent(t)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error || 'Error eliminando la factura');
+      }
+      toast.success('Factura eliminada');
+      setInvoices((prev) => prev.filter((inv) => inv.id !== selectedInvoice.id));
+      closeViewer();
+    } catch (e: any) {
+      console.error(e);
+      toast.error(e?.message || 'Error al eliminar');
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -1011,17 +1071,17 @@ function ClientSideConsultarFacturas() {
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span>Subtotal:</span>
-                          <span>
+                          <span className="whitespace-nowrap">
                             ${(Number(selectedInvoice.total || 0) - (Number(selectedInvoice.tax || 0)) - (Number(selectedInvoice.discount || 0)))
-                              .toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                              .toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                           </span>
                         </div>
                         
                         {selectedInvoice.discount && Number(selectedInvoice.discount) > 0 && (
                           <div className="flex justify-between">
                             <span>Descuento:</span>
-                            <span className="text-red-600">
-                              -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}
+                            <span className="text-red-600 whitespace-nowrap">
+                              -${Number(selectedInvoice.discount || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}
                             </span>
                           </div>
                         )}
@@ -1029,13 +1089,13 @@ function ClientSideConsultarFacturas() {
                         {selectedInvoice.tax && Number(selectedInvoice.tax) > 0 && (
                           <div className="flex justify-between">
                             <span>Impuestos:</span>
-                            <span>${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}</span>
+                            <span className="whitespace-nowrap">${Number(selectedInvoice.tax || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
                           </div>
                         )}
                         
                         <div className="flex justify-between pt-2 border-t mt-2 font-bold text-lg">
                           <span>Total:</span>
-                          <span>${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {maximumFractionDigits: 2})}</span>
+                          <span className="whitespace-nowrap">${Number(selectedInvoice.total || 0).toLocaleString('es-CO', {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
                         </div>
                       </div>
                     </div>
@@ -1043,7 +1103,9 @@ function ClientSideConsultarFacturas() {
                 </div>
               </div>
 
-              <DialogFooter className="border-t pt-4">
+              <DialogFooter className="border-t pt-4 flex gap-2">
+                <Button variant="outline" onClick={goToEditSelectedInvoice}>Editar</Button>
+                <Button variant="destructive" onClick={handleDeleteSelectedInvoice} disabled={deleting}>{deleting ? 'Eliminando...' : 'Eliminar'}</Button>
                 <Button variant="outline" onClick={closeViewer}>Cerrar</Button>
               </DialogFooter>
             </>
