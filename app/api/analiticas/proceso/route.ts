@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server"
 import * as XLSX from "xlsx"
-import { saveUploadedFile } from "@/lib/db"
+import { saveUploadedFile, checkFileExists } from "@/lib/db"
 
 /**
  * SISTEMA ROBUSTO DE PROCESAMIENTO DE DOCUMENTOS SIIGO
@@ -1007,16 +1007,28 @@ export async function POST(request: NextRequest) {
                          `Mes=${monthToSave}, Año=${yearToSave}, ` +
                          `Valor=${fileResult.totalValue}, Filas=${fileResult.processed || 0}`)
               
-              await saveUploadedFile(
+              // Evitar duplicados por (usuario, tipo, mes, año)
+              const exists = await checkFileExists(
                 1, // TODO: Reemplazar con el ID de usuario real
-                file.name,
                 fileResult.documentType,
                 monthToSave,
-                yearToSave,
-                fileResult.totalValue,
-                fileResult.processed || 0
+                yearToSave
               )
-              console.log(`[v0] 📊 Datos guardados en la base de datos para ${file.name}`)
+
+              if (exists) {
+                console.log(`[v0] ⚠️ Registro ya existe en BD para ${file.name} (Tipo=${fileResult.documentType}, Mes=${monthToSave}, Año=${yearToSave}). Se omite inserción.`)
+              } else {
+                await saveUploadedFile(
+                  1, // TODO: Reemplazar con el ID de usuario real
+                  file.name,
+                  fileResult.documentType,
+                  monthToSave,
+                  yearToSave,
+                  fileResult.totalValue,
+                  fileResult.processed || 0
+                )
+                console.log(`[v0] 📊 Datos guardados en la base de datos para ${file.name}`)
+              }
             }
           } catch (dbError) {
             console.error('[v0] ❌ Error al guardar en la base de datos:', dbError)

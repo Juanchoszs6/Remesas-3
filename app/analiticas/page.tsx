@@ -2,13 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FileUpload } from '@/components/analiticas/subir-archivo';
 import { AnalyticsChart } from '@/components/analiticas/AnalyticsChart';
-import type { DocumentType, ProcessedData } from '@/components/analiticas/AnalyticsChart';
+import type { DocumentType } from '@/components/analiticas/AnalyticsChart';
+import { HistorialSubidas } from '@/components/analiticas/historial-subidas';
 import * as XLSX from 'xlsx';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+// (imports de fecha eliminados por no usarse)
+import Link from 'next/link';
 
 const months = [
   'Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
@@ -28,10 +30,11 @@ const formatCurrency = (value: number) => {
 };
 
 export default function AnalyticsPage() {
-  const [activeTab, setActiveTab] = useState('panel');
+  const [activeTab, setActiveTab] = useState('historial');
   const [documentType, setDocumentType] = useState<DocumentType>('FC');
   const [timeRange, setTimeRange] = useState<'month' | 'quarter' | 'year'>('month');
   const [isLoading, setIsLoading] = useState(true);
+  type ProcessedData = { months: string[]; values: number[]; total: number };
   const [chartData, setChartData] = useState<Record<DocumentType, ProcessedData | undefined>>({
     FC: { months: [], values: [], total: 0 },
     ND: { months: [], values: [], total: 0 },
@@ -317,11 +320,16 @@ export default function AnalyticsPage() {
 
   return (
     <div className="container mx-auto py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight">Panel de Análisis</h1>
-        <p className="text-muted-foreground">
-          Carga y analiza tus archivos de transacciones
-        </p>
+      <div className="mb-8 flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Panel de Análisis</h1>
+          <p className="text-muted-foreground">
+            Carga y analiza tus archivos de transacciones
+          </p>
+        </div>
+        <Link href="/analiticas/historial" className="inline-flex">
+          <Button variant="outline">Historial</Button>
+        </Link>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
@@ -329,22 +337,39 @@ export default function AnalyticsPage() {
           <TabsList>
             <TabsTrigger value="upload">Cargar Archivos</TabsTrigger>
             <TabsTrigger 
-              value="panel" 
-              disabled={Object.values(uploadedFiles).every(count => count === 0)}
+              value="panel"
             >
               Panel
             </TabsTrigger>
+            <TabsTrigger value="historial">Historial</TabsTrigger>
             <TabsTrigger value="reports" disabled>Reportes</TabsTrigger>
           </TabsList>
-          {activeTab === 'panel' && (
-            <button 
-              onClick={fetchData}
-              disabled={isLoading}
-              className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? 'Cargando...' : 'Actualizar Datos'}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {activeTab === 'panel' && (
+              <button 
+                onClick={fetchData}
+                disabled={isLoading}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isLoading ? 'Cargando...' : 'Actualizar Datos'}
+              </button>
+            )}
+            {activeTab !== 'historial' ? (
+              <button
+                onClick={() => setActiveTab('historial')}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50"
+              >
+                Ver Historial
+              </button>
+            ) : (
+              <button
+                onClick={() => setActiveTab('panel')}
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md border border-gray-300 hover:bg-gray-50"
+              >
+                Ir al Panel
+              </button>
+            )}
+          </div>
         </div>
 
         <TabsContent value="upload" className="space-y-4">
@@ -447,6 +472,20 @@ export default function AnalyticsPage() {
           </div>
         </TabsContent>
 
+        <TabsContent value="historial" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Historial de Subidas</CardTitle>
+              <CardDescription>
+                Consulta y elimina registros cargados previamente
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <HistorialSubidas onDeleted={async () => { await fetchData(); }} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="panel">
           <div className="space-y-6">
             <div className="grid gap-6">
@@ -510,7 +549,6 @@ export default function AnalyticsPage() {
                         }
                         documentType={documentType}
                         timeRange={timeRange}
-                        data={chartData[documentType]}
                       />
                     )}
                   </div>

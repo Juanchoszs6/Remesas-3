@@ -1,9 +1,13 @@
+'use client';
+
 // Importaciones de bibliotecas y componentes necesarios
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import Link from 'next/link';
+
 import { 
   AlertCircle, 
   FileText, 
@@ -110,9 +114,23 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
   // Función para calcular el hash del contenido del archivo
   const calculateFileHash = async (file: File): Promise<string> => {
     const buffer = await file.arrayBuffer();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // Preferir Web Crypto del navegador si está disponible
+    const subtle = (typeof window !== 'undefined' ? window.crypto?.subtle : undefined) 
+      || (globalThis as unknown as { crypto?: { subtle?: SubtleCrypto } }).crypto?.subtle;
+    if (subtle) {
+      const hashBuffer = await subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    // Fallback (entornos sin Web Crypto): FNV-1a simple
+    const bytes = new Uint8Array(buffer);
+    let h = 0x811c9dc5;
+    for (let i = 0; i < bytes.length; i++) {
+      h ^= bytes[i];
+      h = Math.imul(h, 0x01000193);
+      h >>>= 0;
+    }
+    return ('00000000' + h.toString(16)).slice(-8);
   };
 
   // Función que se ejecuta cuando se sueltan archivos en la zona de carga
@@ -162,91 +180,20 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
     // Agregar los archivos al estado
     setFiles(prev => [...prev, ...filesToProcess]);
 
-    // Procesar los archivos
-    const processFiles = async (filesToProcess: UploadedFileData[]) => {
-      for (const fileData of filesToProcess) {
-        const toastId = toast.loading(`Procesando ${fileData.file.name}...`);
-        
-        try {
-          const formData = new FormData();
-          formData.append('file', fileData.file);
-
-          const response = await fetch('/api/analiticas/proceso', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!response.ok) {
-            throw new Error(`Error al subir el archivo: ${response.statusText}`);
-          }
-
-          const result = await response.json();
-          
-          // Actualizar el estado del archivo
-          setFiles(prev => 
-            prev.map(f => 
-              f.file === fileData.file 
-                ? { 
-                    ...f, 
-                    status: 'success' as const, 
-                    data: result.data,
-                    debugInfo: result.debug
-                  } 
-                : f
-            )
-          );
-
-          // Notificar que el archivo se procesó correctamente
-          if (onFileProcessed) {
-            onFileProcessed({
-              success: true,
-              documentType: fileData.type as DocumentType,
-              totalValue: result.data?.totalValue,
-              processedRows: result.data?.processedRows,
-              filename: fileData.file.name,
-              shouldRefresh: true
-            });
-          }
-
-          toast.success(`Archivo ${fileData.file.name} procesado correctamente`, { id: toastId });
-        } catch (error) {
-          console.error('Error procesando archivo:', error);
-          setFiles(prev => 
-            prev.map(f => 
-              f.file === fileData.file 
-                ? { 
-                    ...f, 
-                    status: 'error' as const, 
-                    error: error instanceof Error ? error.message : 'Error desconocido'
-                  } 
-                : f
-            )
-          );
-          toast.error(`Error al procesar ${fileData.file.name}`, { 
-            id: toastId,
-            description: error instanceof Error ? error.message : 'Error desconocido'
-          });
-        }
-      }
-      
-      // Notificar que la carga ha finalizado
-      if (onUploadComplete) {
-        onUploadComplete();
-      }
-    };
-
+    // Procesar los archivos (usar la función global del componente)
     try {
-      await processFiles(newFiles);
+      await processFiles(filesToProcess);
     } catch (error) {
       console.error('Error procesando archivos:', error);
       toast.error('Error al procesar los archivos. Por favor, intente nuevamente.');
     }
-  }, [onFileProcessed, onUploadComplete]);
+  }, [files, onFileProcessed, onUploadComplete]);
 
   // Función para procesar los archivos
   const processFiles = async (filesToProcess: UploadedFileData[]) => {
     setIsUploading(true);
 
+    try {
     // Procesar cada archivo
     for (let i = 0; i < filesToProcess.length; i++) {
       const fileData = filesToProcess[i];
@@ -455,35 +402,9 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
     if (onUploadComplete) {
       onUploadComplete();
     }
-  };
-
-  // Configuración de la zona de arrastrar y soltar
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,  
-    accept: {
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
-      'application/vnd.ms-excel': ['.xls'],
-      'text/csv': ['.csv']
-    },
-    multiple: true, 
-    onDropRejected: (fileRejections) => {
-      const errorMessages = fileRejections.map(({ file, errors }) => {
-        const errorMessage = errors.map(e => e.message).join(', ');
-        return `Error en ${file.name}: ${errorMessage}`;
-      });
-      toast.error(errorMessages.join('\n'));
+    } finally {
+      setIsUploading(false);
     }
-  });
-
-  // Función para obtener el nombre del tipo de documento
-  const getDocumentTypeName = (type: DocumentType | 'unknown') => {
-    if (type === 'unknown') return 'Tipo desconocido';
-    return documentTypeNames[type] || 'Tipo desconocido';
-  };
-
-  // Función para limpiar todos los archivos
-  const clearAllFiles = () => {
-    setFiles([]);
   };
 
   // Función para reintentar la carga de un archivo
@@ -495,6 +416,75 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
   const removeFile = (fileName: string) => {
     setFiles(prevFiles => prevFiles.filter(f => f.file.name !== fileName));
   };
+
+  // Eliminar registro de la BD para un archivo procesado por si hubo un error
+  const removeFromDatabase = async (fileDataToRemove: UploadedFileData) => {
+    const toastId = toast.loading(`Eliminando ${fileDataToRemove.file.name} de la base de datos...`);
+    try {
+      const response = await fetch('/api/analiticas/eliminar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: fileDataToRemove.file.name,
+          documentType: fileDataToRemove.type !== 'unknown' ? fileDataToRemove.type : undefined,
+        }),
+      });
+      let result = await response.json();
+      if (!response.ok || !result?.success) {
+        // Reintentar con eliminación por nombre global como último recurso
+        const resp2 = await fetch('/api/analiticas/eliminar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileName: fileDataToRemove.file.name,
+            deleteAllWithName: true,
+          }),
+        });
+        const res2 = await resp2.json();
+        if (!resp2.ok || !res2?.success) {
+          throw new Error(res2?.error || res2?.details || result?.error || result?.details || 'No se pudo eliminar el registro');
+        }
+        result = res2;
+      }
+
+      // Quitar de la UI
+      removeFile(fileDataToRemove.file.name);
+
+      // Notificar al padre para refrescar datos
+      if (onFileProcessed) {
+        onFileProcessed({
+          success: true,
+          documentType: (fileDataToRemove.type === 'unknown' ? documentType : fileDataToRemove.type) as DocumentType,
+          filename: fileDataToRemove.file.name,
+          shouldRefresh: true,
+        });
+      }
+
+      toast.success(`Eliminado ${fileDataToRemove.file.name} de la base de datos`, { id: toastId });
+    } catch (err) {
+      console.error('Error eliminando de BD:', err);
+      const msg = err instanceof Error ? err.message : 'Error desconocido';
+      toast.error(`No se pudo eliminar ${fileDataToRemove.file.name}`, { id: toastId, description: msg });
+    }
+  };
+
+  // Configuración de la zona de arrastrar y soltar
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop,
+    accept: {
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+      'application/vnd.ms-excel': ['.xls'],
+      'text/csv': ['.csv']
+    },
+    multiple: true,
+    onDropRejected: (fileRejections) => {
+      const errorMessages = fileRejections.map(({ file, errors }) => {
+        const errorMessage = errors.map(e => e.message).join(', ');
+        return `Error en ${file.name}: ${errorMessage}`;
+      });
+      toast.error(errorMessages.join('\n'));
+    }
+  });
 
   const getStatusIcon = (status: UploadedFileData['status']) => {
     switch (status) {
@@ -529,8 +519,24 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
   const errorCount = countFilesByStatus('error');
   const uploadingCount = countFilesByStatus('uploading');
 
+  // Función para obtener el nombre del tipo de documento
+  const getDocumentTypeName = (type: DocumentType | 'unknown') => {
+    if (type === 'unknown') return 'Tipo desconocido';
+    return documentTypeNames[type] || 'Tipo desconocido';
+  };
+
+  // Función para limpiar todos los archivos
+  const clearAllFiles = () => {
+    setFiles([]);
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Link href="/analiticas/historial" className="inline-flex">
+          <Button variant="outline">Historial de archivos</Button>
+        </Link>
+      </div>
       {/* Zona de carga */}
       <div
         {...getRootProps()}
@@ -667,6 +673,18 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
 
                   {/* Botones de acción */}
                   <div className="flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {fileData.status === 'success' && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeFromDatabase(fileData);
+                        }}
+                        className="text-xs text-red-600 hover:text-red-800 font-medium px-2 py-1 rounded hover:bg-red-50 flex items-center space-x-1"
+                        disabled={isUploading}
+                      >
+                        <span>Quitar factura</span>
+                      </button>
+                    )}
                     {fileData.status === 'error' && (
                       <button
                         onClick={() => retryFile(fileData)}
