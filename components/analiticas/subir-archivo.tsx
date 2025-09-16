@@ -150,6 +150,23 @@ export function FileUpload({ onFileProcessed, onUploadComplete, documentType, ti
         toast.warning(`El archivo "${file.name}" ya está en la lista de carga.`);
         continue;
       }
+      // Verificar en servidor si ya existe un registro con el mismo nombre (evita duplicados en BD)
+      try {
+        const resp = await fetch(`/api/analiticas/uploads?fileName=${encodeURIComponent(file.name)}`);
+        if (resp.ok) {
+          const json = await resp.json();
+          if (json?.success && Array.isArray(json.data) && json.data.length > 0) {
+            const r = json.data[0];
+            const mes = r?.month ? String(r.month).padStart(2, '0') : '';
+            const info = r?.document_type && r?.year ? ` (${r.document_type} ${mes}/${r.year})` : '';
+            toast.warning(`El archivo "${file.name}" ya fue cargado anteriormente${info}.`);
+            continue;
+          }
+        }
+      } catch (e) {
+        console.warn('No se pudo validar duplicado en el servidor:', e);
+        // No bloquear la carga por un fallo de red; continuar validando por hash local
+      }
       
       // Calcular hash del archivo
       try {

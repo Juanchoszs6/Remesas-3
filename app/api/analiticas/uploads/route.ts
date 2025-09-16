@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { sql } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
@@ -8,134 +9,75 @@ export async function GET(request: Request) {
     const documentType = searchParams.get('documentType') || undefined;
     const monthParam = searchParams.get('month');
     const yearParam = searchParams.get('year');
+    const fileName = searchParams.get('fileName') || undefined;
     const month = monthParam ? parseInt(monthParam, 10) : undefined;
     const year = yearParam ? parseInt(yearParam, 10) : undefined;
 
-    // Obtener usuario actual. Si no hay sesión, no filtramos por usuario
-    let userId: number | null = null;
-    try {
-      const user = await getCurrentUser();
-      if (user?.id) userId = user.id;
-    } catch {
-      // ignore
-    }
-
+    // Para el historial no dependemos de autenticación: no filtrar por user_id
     let rows: any[] = [];
 
-    const byUser = userId !== null;
+    // Filtro específico por nombre de archivo (útil para validaciones de duplicado)
+    if (fileName) {
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE file_name = ${fileName}
+        ORDER BY uploaded_at DESC
+      ` as any[];
+      return NextResponse.json({ success: true, data: rows });
+    }
 
     if (documentType && month && year) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND document_type = ${documentType}
-              AND month = ${month}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE document_type = ${documentType}
-              AND month = ${month}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE document_type = ${documentType}
+          AND month = ${month}
+          AND year = ${year}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (documentType && month) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND document_type = ${documentType}
-              AND month = ${month}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE document_type = ${documentType}
-              AND month = ${month}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE document_type = ${documentType}
+          AND month = ${month}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (documentType && year) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND document_type = ${documentType}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE document_type = ${documentType}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE document_type = ${documentType}
+          AND year = ${year}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (documentType) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND document_type = ${documentType}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE document_type = ${documentType}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE document_type = ${documentType}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (month && year) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND month = ${month}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE month = ${month}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE month = ${month}
+          AND year = ${year}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (month) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND month = ${month}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE month = ${month}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE month = ${month}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else if (year) {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-              AND year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            WHERE year = ${year}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        WHERE year = ${year}
+        ORDER BY uploaded_at DESC
+      ` as any[];
     } else {
-      rows = byUser
-        ? await sql`
-            SELECT * FROM uploaded_files
-            WHERE user_id = ${userId}
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[]
-        : await sql`
-            SELECT * FROM uploaded_files
-            ORDER BY year DESC, month DESC, document_type
-          ` as any[];
+      rows = await sql`
+        SELECT * FROM uploaded_files
+        ORDER BY uploaded_at DESC
+      ` as any[];
     }
 
     return NextResponse.json({ success: true, data: rows });
