@@ -1,139 +1,159 @@
 import { NextResponse } from 'next/server';
-import { sql } from '@/lib/db';
+import { sql, deleteUploadedFile } from '@/lib/db';
 import { getCurrentUser } from '@/lib/auth';
 
 export async function POST(request: Request) {
+  // Mover la declaración de body al inicio para que esté disponible en el catch
+  let body;
   try {
-    const body = await request.json();
-    const { id, fileName, documentType, month, year, deleteAllWithName } = body || {};
-
-    // Intentar obtener usuario actual; fallback temporal al usuario 1
-    let userId = 1;
-    try {
-      const user = await getCurrentUser();
-      if (user?.id) userId = user.id;
-    } catch (e) {
-      // Si falla auth, continuar con userId por defecto (para entornos de desarrollo)
-      console.warn('No se pudo obtener el usuario actual, usando ID 1');
-    }
-
-    // Validar parámetros de entrada
-    if (id) {
-      // Eliminación por ID
-      const result = await sql`
-        DELETE FROM uploaded_files
-        WHERE id = ${id} AND (user_id = ${userId} OR ${userId} = 1)
-        RETURNING *
-      ` as any[];
-
-      if (result && Array.isArray(result) && result.length > 0) {
-        return NextResponse.json({ 
-          success: true, 
-          deletedCount: result.length,
-          data: result.length === 1 ? result[0] : result
-        });
-      } else {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: 'No se encontraron registros para eliminar',
-            details: 'Verifica los parámetros e inténtalo de nuevo'
-          },
-          { status: 404 }
-        );
-      }
-    }
+    body = await request.json();
+    console.log('Solicitud de eliminación recibida:', JSON.stringify(body, null, 2));
+    const { id, fileName, documentType, month, year } = body || {};
     
-    // Validar parámetros para eliminación por mes/año/tipo
-    if (!fileName && !(documentType && month !== undefined && year !== undefined)) {
+    // Validar que tengamos al menos un identificador
+    if (!id && !(fileName || (documentType && month && year))) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Parámetros insuficientes', 
-          details: 'Se requiere id, fileName o (documentType, month, year)' 
+          error: 'Parámetros insuficientes',
+          details: 'Se requiere al menos un ID o la combinación de tipo, mes y año' 
         },
         { status: 400 }
       );
     }
 
-    let result;
-    
-    if (fileName) {
-      // Eliminar por nombre de archivo
-      if (deleteAllWithName) {
-        // Eliminar para cualquier usuario (solo para admin/desarrollo)
-        result = await sql`
-          DELETE FROM uploaded_files
-          WHERE file_name = ${fileName}
-          RETURNING *
-        ` as any[];
-      } else {
-        // Intentar con user_id primero
-        result = await sql`
-          DELETE FROM uploaded_files
-          WHERE user_id = ${userId} AND file_name = ${fileName}
-          RETURNING *
-        ` as any[];
-        
-        // Si no se encontró, intentar sin user_id (para compatibilidad)
-        if (!Array.isArray(result) || result.length === 0) {
-          result = await sql`
-            DELETE FROM uploaded_files
-            WHERE file_name = ${fileName}
-            RETURNING *
-          ` as any[];
-        }
-      }
-    } else if (documentType && month !== undefined && year !== undefined) {
-      // Asegurarse de que month y year sean números
-      const monthNum = typeof month === 'string' ? parseInt(month, 10) : Number(month);
-      const yearNum = typeof year === 'string' ? parseInt(year, 10) : Number(year);
+    // Obtener el ID de usuario actual
+    let userId = 1;
+    try {
+      const user = await getCurrentUser();
+      if (user?.id) userId = user.id;
+    } catch (e) {
+      console.warn('No se pudo obtener el usuario actual, usando ID 1');
+    }
+
+    // Si tenemos un ID, intentamos eliminar por ID
+    if (id) {
+      console.log(`Iniciando eliminación para ID: ${id}, Usuario: ${userId}`);
       
-      if (isNaN(monthNum) || isNaN(yearNum)) {
-        return NextResponse.json(
-          { success: false, error: 'Mes o año inválido' },
-          { status: 400 }
-        );
-              AND file_name = ${fileName}
-            RETURNING *
-          ` as any;
+      try {
+        // Usamos la función deleteUploadedFile que maneja la lógica de eliminación
+        const { success, deletedCount } = await deleteUploadedFile(Number(id), userId);
+        
+        if (success) {
+          console.log(`Eliminación exitosa. Registros eliminados: ${deletedCount}`);
+          return NextResponse.json({ 
+            success: true, 
+            deletedCount,
+            message: 'Registro eliminado exitosamente'
+          });
         }
-      } else {
-        rows = await sql`
-          DELETE FROM uploaded_files
-          WHERE user_id = ${userId}
-            AND document_type = ${documentType}
-            AND month = ${month}
-            AND year = ${year}
-          RETURNING *
-        ` as any;
-        if (!Array.isArray(rows) || rows.length === 0) {
-          rows = await sql`
+      } catch (error) {
+        console.error('Error al eliminar por ID:', error);
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Error al eliminar el registro',
+            details: error instanceof Error ? error.message : 'Error desconocido'
+          },
+          { status: 500 }
+        );
+      }
+    }
+    
+    // Si no se proporcionó un ID, intentamos con los otros parámetros
+    if (documentType && month && year) {
+      try {
+        // Construir la consulta dinámicamente usando template literals
+        let result;
+        
+        if (fileName) {
+          // Eliminar con nombre de archivo
+          result = await sql`
             DELETE FROM uploaded_files
             WHERE document_type = ${documentType}
               AND month = ${month}
               AND year = ${year}
+              AND file_name = ${fileName}
+              AND (user_id = ${userId} OR ${userId} = 1)
             RETURNING *
-          ` as any;
+          ` as any[];
+          
+          // Si no se encontró con el ID de usuario, intentar sin esa restricción
+          if (!result || result.length === 0) {
+            result = await sql`
+              DELETE FROM uploaded_files
+              WHERE document_type = ${documentType}
+                AND month = ${month}
+                AND year = ${year}
+                AND file_name = ${fileName}
+              RETURNING *
+            ` as any[];
+          }
+        } else {
+          // Eliminar sin nombre de archivo
+          result = await sql`
+            DELETE FROM uploaded_files
+            WHERE document_type = ${documentType}
+              AND month = ${month}
+              AND year = ${year}
+              AND (user_id = ${userId} OR ${userId} = 1)
+            RETURNING *
+          ` as any[];
+          
+          // Si no se encontró con el ID de usuario, intentar sin esa restricción
+          if (!result || result.length === 0) {
+            result = await sql`
+              DELETE FROM uploaded_files
+              WHERE document_type = ${documentType}
+                AND month = ${month}
+                AND year = ${year}
+              RETURNING *
+            ` as any[];
+          }
         }
+        
+        if (result && result.length > 0) {
+          return NextResponse.json({ 
+            success: true, 
+            deletedCount: result.length,
+            data: result 
+          });
+        }
+      } catch (error) {
+        console.error('Error al eliminar por parámetros:', error);
+        throw error;
       }
     }
 
-    const deletedCount = Array.isArray(rows) ? rows.length : 0;
-
-    if (deletedCount === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No se encontraron registros para eliminar' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({ success: true, deletedCount });
+    // Si llegamos aquí, no se pudo eliminar con ninguno de los métodos
+    const errorMsg = id 
+      ? `No se encontró ningún registro con ID ${id} o no tienes permisos para eliminarlo`
+      : 'No se proporcionaron los parámetros necesarios para la eliminación';
+      
+    console.error(errorMsg);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'No se pudo eliminar el registro',
+        details: errorMsg
+      },
+      { status: 404 }
+    );
   } catch (error) {
     console.error('Error en /api/analiticas/eliminar:', error);
     const message = error instanceof Error ? error.message : 'Error desconocido';
+    console.error('Error completo:', {
+      message,
+      stack: error instanceof Error ? error.stack : 'No hay stack trace disponible',
+      body: JSON.stringify(body, null, 2)
+    });
     return NextResponse.json(
-      { success: false, error: 'Error interno del servidor', details: message },
+      { 
+        success: false, 
+        error: 'Error interno del servidor', 
+        details: message,
+        timestamp: new Date().toISOString()
+      },
       { status: 500 }
     );
   }

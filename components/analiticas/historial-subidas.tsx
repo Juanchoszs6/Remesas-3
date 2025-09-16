@@ -1,20 +1,18 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Trash2, Loader2 } from "lucide-react";
+import { RefreshCw, Trash2, Loader2, AlertTriangle } from "lucide-react";
 import type { DocumentType } from "@/types/document.types";
-
-// Definir tipos
-const DOCUMENT_TYPES = ["FC", "ND", "DS", "RP"] as const;
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 type UploadedRow = {
   id: number;
   file_name: string;
-  document_type: DocumentType;
+  document_type: DocumentType | string;
   month: number;
   year: number;
-  total_value: number | string;
+  total_value: number;
   processed_rows: number;
   uploaded_at: string;
 };
@@ -26,12 +24,11 @@ interface HistorialSubidasProps {
 
 export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialSubidasProps) {
   const [rows, setRows] = useState<UploadedRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<DocumentType | "ALL">(documentType);
   const [monthFilter, setMonthFilter] = useState<number | "ALL">("ALL");
   const [yearFilter, setYearFilter] = useState<number | "ALL">("ALL");
-  const [isDeleting, setIsDeleting] = useState<number | null>(null);
 
   const query = useMemo(() => {
     const params = new URLSearchParams();
@@ -42,30 +39,19 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
   }, [typeFilter, monthFilter, yearFilter]);
 
   const load = async () => {
+    setLoading(true);
+    setError(null);
     try {
-      setLoading(true);
-      const response = await fetch(`/api/analiticas/uploads${query}`);
-      const result = await response.json();
-
-      if (result.success) {
-        // Asegurarse de que los valores numéricos sean tratados correctamente
-        const formattedData = (result.data || []).map((row: any) => ({
-          ...row,
-          total_value: Number(row.total_value) || 0,
-          month: Number(row.month) || 1,
-          year: Number(row.year) || new Date().getFullYear(),
-          processed_rows: Number(row.processed_rows) || 0
-        }));
-
-        setRows(formattedData);
-        setError(null);
-      } else {
-        throw new Error(result.error || 'Error al cargar el historial');
+      const res = await fetch(`/api/analiticas/uploads${query}`);
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || "No se pudieron cargar los registros");
       }
-    } catch (error) {
-      console.error('Error loading history:', error);
-      setError(error instanceof Error ? error.message : 'Error al cargar el historial');
-      setRows([]);
+      setRows(data.data || []);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Error desconocido";
+      setError(msg);
+      toast.error("Error cargando historial", { description: msg });
     } finally {
       setLoading(false);
     }
@@ -84,94 +70,35 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
     return Array.from({ length: 5 }, (_, i) => currentYear - i);
   }, [rows, currentYear]);
 
-  const handleDelete = async (row: UploadedRow) => {
-    if (!confirm(`¿Estás seguro de eliminar el registro de ${row.file_name}?`)) return;
-    
-    const toastId = toast.loading(`Eliminando ${row.file_name}...`);
-    try {
-      setIsDeleting(row.id);
-      
-      // Ensure month and year are numbers
-      // Ensure we have valid month and year values
-      const month = typeof row.month === 'string' ? parseInt(row.month, 10) : row.month;
-      const year = typeof row.year === 'string' ? parseInt(row.year, 10) : row.year;
-      
-      if (isNaN(month) || isNaN(year) || month < 1 || month > 12) {
-        throw new Error("Mes o año inválido en el registro");
-      }
-      
-      const res = await fetch("/api/analiticas/eliminar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: row.file_name,
-          documentType: row.document_type,
-          month: month,
-          year: year,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || data?.details || "No se pudo eliminar el registro");
-      }
-
-      await load();
-      if (onDeleted) await onDeleted();
-      toast.success("Registro eliminado", { id: toastId });
-    } catch (error) {
-      console.error('Error deleting record:', error);
-      const msg = error instanceof Error ? error.message : 'Error al eliminar el registro';
-      toast.error("Error eliminando registro", { id: toastId, description: msg });
-    } finally {
-      setIsDeleting(null);
-    }
-  };
-
   const handleBulkDelete = async () => {
-    if (typeFilter === 'ALL' || monthFilter === 'ALL' || yearFilter === 'ALL') {
-      toast.error("Selecciona un tipo, mes y año específicos para eliminar");
+    if (typeFilter === "ALL" || monthFilter === "ALL" || yearFilter === "ALL") {
+      toast.error("Para eliminar en bloque, selecciona Tipo, Mes y Año");
       return;
     }
-
-    // Ensure month and year are numbers
-    const month = Number(monthFilter);
-    const year = Number(yearFilter);
-
-    if (isNaN(month) || isNaN(year)) {
-      toast.error("Mes o año inválido");
-      return;
-    }
-
-    if (!confirm(`¿Eliminar todos los registros de ${typeFilter} del ${month.toString().padStart(2, '0')}/${year}?`)) return;
-
-    const toastId = toast.loading(`Eliminando registros...`);
+    const mes = monthNames[(monthFilter as number) - 1];
+    const confirmed = window.confirm(`¿Eliminar todas las facturas de ${typeFilter} del mes ${mes} ${yearFilter}?`);
+    if (!confirmed) return;
+    const toastId = toast.loading("Eliminando registros filtrados...");
     try {
-      setIsDeleting(-1);
-      const response = await fetch('/api/analiticas/eliminar', {
+      const res = await fetch('/api/analiticas/eliminar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          documentType: typeFilter, 
-          month: month,
-          year: year
-        })
+        body: JSON.stringify({
+          documentType: typeFilter,
+          month: monthFilter,
+          year: yearFilter,
+        }),
       });
-
-      const result = await response.json();
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || result?.details || 'Error al eliminar los registros');
+      const data = await res.json();
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || data?.details || 'No se pudo eliminar');
       }
-
       await load();
       if (onDeleted) await onDeleted();
-      toast.success(`Se eliminaron ${result.deletedCount || 0} registros`, { id: toastId });
-    } catch (error) {
-      console.error('Error deleting records:', error);
-      const msg = error instanceof Error ? error.message : 'Error al eliminar los registros';
-      toast.error("Error eliminando registros", { id: toastId, description: msg });
-    } finally {
-      setIsDeleting(null);
+      toast.success(`Eliminados ${data.deletedCount || 0} registros`, { id: toastId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Error desconocido';
+      toast.error('Error en eliminación masiva', { id: toastId, description: msg });
     }
   };
 
@@ -181,24 +108,133 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
   }, [query]);
 
   const formatMoney = (v: number) =>
-    new Intl.NumberFormat("es-CO", { 
-      style: "currency", 
-      currency: "COP", 
-      maximumFractionDigits: 0 
-    }).format(Number(v || 0));
+    new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 }).format(
+      Number(v || 0)
+    );
 
+  const [isDeleting, setIsDeleting] = useState<number | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [rowToDelete, setRowToDelete] = useState<UploadedRow | null>(null);
+
+  const handleDeleteClick = (row: UploadedRow, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    console.log('Mostrando diálogo de confirmación para:', row.id, row.file_name);
+    setRowToDelete(row);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDelete = useCallback(async (row: UploadedRow) => {
+    if (!row) {
+      console.error('No se proporcionó un registro para eliminar');
+      return;
+    }
+
+    const toastId = toast.loading(`Eliminando ${row.file_name}...`);
+    setIsDeleting(row.id);
+    
+    try {
+      console.log('Iniciando eliminación para el registro:', row);
+      
+      // Intentamos eliminar por ID
+      console.log('Enviando solicitud de eliminación para ID:', row.id);
+      const res = await fetch("/api/analiticas/eliminar", {
+        method: "POST",
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({
+          id: row.id,
+          fileName: row.file_name,
+          documentType: row.document_type,
+          month: row.month,
+          year: row.year
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      console.log('Respuesta del servidor:', { status: res.status, data });
+      
+      if (!res.ok) {
+        const errorMsg = data?.error || data?.details || `Error ${res.status}: ${res.statusText}`;
+        console.error('Error en la respuesta del servidor:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      if (!data?.success) {
+        const errorMsg = data?.error || data?.details || 'No se pudo eliminar el registro';
+        console.error('Error en la eliminación:', errorMsg);
+        throw new Error(errorMsg);
+      }
+
+      console.log('Eliminación exitosa, recargando datos...');
+      
+      // Refrescar la tabla
+      await load();
+      
+      // Notificar al componente padre para actualizar las analíticas
+      if (onDeleted) {
+        await onDeleted();
+      }
+
+      toast.success("Registro eliminado exitosamente", { id: toastId });
+    } catch (e) {
+      console.error('Error en handleDelete:', e);
+      const msg = e instanceof Error ? e.message : "Error desconocido al eliminar el registro";
+      toast.error("Error al eliminar", { 
+        id: toastId, 
+        description: msg,
+        action: {
+          label: "Reintentar",
+          onClick: () => handleDelete(row)
+        }
+      });
+    } finally {
+      setIsDeleting(null);
+    }
+  }, [load, onDeleted]);
   return (
+    <>
+      <ConfirmDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="¿Estás seguro?"
+        description={
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-yellow-600 dark:text-yellow-500">
+              <AlertTriangle className="h-5 w-5" />
+              <span>Esta acción no se puede deshacer</span>
+            </div>
+            <p>
+              ¿Estás seguro de que deseas eliminar el archivo <strong>{rowToDelete?.file_name}</strong>?
+            </p>
+          </div>
+        }
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        variant="destructive"
+        onConfirm={() => {
+          if (rowToDelete) {
+            handleDelete(rowToDelete);
+          }
+        }}
+        onCancel={() => {
+          console.log('Eliminación cancelada por el usuario');
+          setRowToDelete(null);
+        }}
+      />
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-medium">Historial de Subidas</h3>
-          <button
-            onClick={load}
-            className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 px-3 py-1 rounded hover:bg-blue-50 disabled:opacity-50"
-            disabled={loading}
-          >
-            <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? "Cargando..." : "Actualizar"}
-          </button>
+        <button
+          onClick={load}
+          className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 px-3 py-1 rounded hover:bg-blue-50"
+          disabled={loading}
+        >
+          <RefreshCw className="h-4 w-4 mr-1" />
+          {loading ? "Cargando..." : "Actualizar"}
+        </button>
       </div>
 
       {error && (
@@ -226,10 +262,7 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
           <select
             className="px-3 py-2 border rounded-md text-sm"
             value={monthFilter}
-            onChange={(e) => {
-              const value = e.target.value;
-              setMonthFilter(value === 'ALL' ? 'ALL' : Number(value));
-            }}
+            onChange={(e) => setMonthFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
           >
             <option value="ALL">Todos</option>
             {monthNames.map((m, i) => (
@@ -242,10 +275,7 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
           <select
             className="px-3 py-2 border rounded-md text-sm"
             value={yearFilter}
-            onChange={(e) => {
-              const value = e.target.value;
-              setYearFilter(value === 'ALL' ? 'ALL' : Number(value));
-            }}
+            onChange={(e) => setYearFilter(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
           >
             <option value="ALL">Todos</option>
             {yearOptions.map(y => (
@@ -308,20 +338,22 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
                 <td className="px-3 py-2 truncate max-w-xs" title={r.file_name}>{r.file_name}</td>
                 <td className="px-3 py-2 text-right">
                   <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      handleDelete(r);
-                    }}
-                    className="inline-flex items-center text-xs text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50"
+                    onClick={(e) => handleDeleteClick(r, e)}
+                    className="inline-flex items-center text-xs text-red-600 hover:text-red-800 px-2 py-1 rounded hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
                     disabled={loading || isDeleting === r.id}
-                    title="Quitar factura"
+                    title={isDeleting === r.id ? "Eliminando..." : "Eliminar registro"}
                   >
                     {isDeleting === r.id ? (
-                      <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      <>
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        <span>Eliminando...</span>
+                      </>
                     ) : (
-                      <Trash2 className="h-4 w-4 mr-1" />
+                      <>
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        <span>Eliminar</span>
+                      </>
                     )}
-                    {isDeleting === r.id ? 'Eliminando...' : 'Quitar factura'}
                   </button>
                 </td>
               </tr>
@@ -330,5 +362,6 @@ export function HistorialSubidas({ documentType = "ALL", onDeleted }: HistorialS
         </table>
       </div>
     </div>
+    </>
   );
 }

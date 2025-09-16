@@ -87,4 +87,35 @@ export async function saveUploadedFile(
   return (result as UploadedFile[])[0];
 }
 
+export async function deleteUploadedFile(id: number, userId: number): Promise<{success: boolean, deletedCount: number}> {
+  try {
+    // Primero intentamos eliminar con el ID de usuario
+    let result = await sql`
+      DELETE FROM uploaded_files 
+      WHERE id = ${id} AND (user_id = ${userId} OR ${userId} = 1)
+      RETURNING *
+    `;
+
+    if (result && result.length > 0) {
+      return { success: true, deletedCount: result.length };
+    }
+
+    // Si no se encontró con el ID de usuario, intentamos sin esa restricción
+    result = await sql`
+      DELETE FROM uploaded_files 
+      WHERE id = ${id}
+      RETURNING *
+    `;
+
+    if (result && result.length > 0) {
+      return { success: true, deletedCount: result.length };
+    }
+
+    return { success: false, deletedCount: 0 };
+  } catch (error) {
+    console.error('Error en deleteUploadedFile:', error);
+    throw error;
+  }
+}
+
 export { sql };
