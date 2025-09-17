@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/select';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { InvoiceType } from '@/types/invoice';
 
 // Using the imported InvoiceType from types
@@ -166,7 +167,11 @@ export default function ConsultarFacturas() {
     );
   }
 
-  return <ClientSideConsultarFacturas />;
+  return (
+    <TooltipProvider>
+      <ClientSideConsultarFacturas />
+    </TooltipProvider>
+  );
 }
 
 // Client component that will be dynamically imported
@@ -435,10 +440,9 @@ function ClientSideConsultarFacturas() {
                 <TableRow>
                   <TableHead># Factura</TableHead>
                   <TableHead>Fecha</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead className="text-right">Impuestos</TableHead>
+                  <TableHead>Proveedor</TableHead>
                   <TableHead className="text-right">Total</TableHead>
-                  <TableHead>Estado</TableHead>
+                  <TableHead className="text-center">Estado</TableHead>
                   <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
@@ -460,27 +464,38 @@ function ClientSideConsultarFacturas() {
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col">
-                        <span className="font-medium">{invoice.customer?.name || 'Sin nombre'}</span>
-                        <div className="flex items-center space-x-2 text-xs text-muted-foreground">
-                          {invoice.customer?.identification && (
-                            <span>{invoice.customer.identification}</span>
-                          )}
-                          {invoice.customer?.email && (
-                            <span>• {invoice.customer.email}</span>
-                          )}
+                        <span className="font-medium">
+                          {invoice.supplier?.name || invoice.customer?.name || 'Sin proveedor'}
+                        </span>
+                        <div className="text-xs text-muted-foreground">
+                          {invoice.supplier?.identification || invoice.customer?.identification || 'N/A'}
                         </div>
                       </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {invoice.tax ? `$${Math.round(Number(invoice.tax)).toLocaleString('es-CO')}` : '$0'}
                     </TableCell>
                     <TableCell className="text-right font-semibold">
                       {`$${Math.round(Number(invoice.total)).toLocaleString('es-CO')}`}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusInfo(invoice.status).variant} className="whitespace-nowrap">
-                        {getStatusInfo(invoice.status).text}
-                      </Badge>
+                    <TableCell className="text-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant={getStatusInfo(invoice.status).variant} className="whitespace-nowrap cursor-help">
+                            {getStatusInfo(invoice.status).text}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[300px]">
+                          <p className="text-sm">
+                            {invoice.status === 'draft' && 'Documento en borrador'}
+                            {invoice.status === 'posted' && 'Documento registrado'}
+                            {invoice.status === 'cancelled' && 'Documento anulado'}
+                            {!['draft', 'posted', 'cancelled'].includes(invoice.status) && `Estado: ${invoice.status}`}
+                          </p>
+                          {invoice.updated_at && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Última actualización: {new Date(invoice.updated_at).toLocaleString()}
+                            </p>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
                     </TableCell>
                     <TableCell className="text-right">
                       <Button

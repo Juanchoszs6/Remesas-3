@@ -70,12 +70,37 @@ export async function GET(request: Request) {
       );
     }
 
-    const data = await response.json();
+    let responseData = await response.json();
+    let documents = Array.isArray(responseData) ? responseData : responseData.results || [];
+    
+    // Calculate total for RP documents
+    if (documentType === 'RP' && Array.isArray(documents)) {
+      documents = documents.map(doc => {
+        // Calcular la suma de TODOS los ítems sin importar si son débito o crédito
+        const total = doc.items?.reduce((sum: number, item: any) => {
+          // Sumar el valor absoluto de todos los ítems
+          const value = Math.abs(Number(item.value) || 0);
+          console.log(`Sumando ítem:`, { 
+            value: item.value, 
+            movement: item.account?.movement,
+            parsed: value
+          });
+          return sum + value;
+        }, 0) || 0;
+
+        console.log(`Documento RP ${doc.number || doc.id} - Total calculado:`, total, 'Items:', doc.items?.length);
+        
+        return {
+          ...doc,
+          total: total
+        };
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      data: Array.isArray(data) ? data : data.results || [],
-      pagination: data.pagination || null,
+      data: documents,
+      pagination: responseData.pagination || null,
       type: documentType,
       url: apiUrl.toString()
     });
