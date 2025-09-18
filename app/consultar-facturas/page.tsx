@@ -178,13 +178,32 @@ export default function ConsultarFacturas() {
 function ClientSideConsultarFacturas() {
   const router = useRouter();
 
-  // Document types with their API endpoints
-  const documentTypes = [
-    { id: 'FC', name: 'Factura de Compra', endpoint: 'invoices' },
-    { id: 'ND', name: 'Nota Débito', endpoint: 'debit-notes' },
-    { id: 'DS', name: 'Documento Soporte', endpoint: 'support-documents' },
-    { id: 'RP', name: 'Recibo de Pago', endpoint: 'payment-receipts' }
+  // Document categories and types
+  const documentCategories = [
+    {
+      id: 'purchase',
+      name: 'Documentos de Compra',
+      types: [
+        { id: 'FC', name: 'Factura de Compra', endpoint: 'documents', type: 'purchase' },
+        { id: 'ND', name: 'Nota Débito', endpoint: 'documents', type: 'purchase' },
+        { id: 'DS', name: 'Documento Soporte', endpoint: 'documents', type: 'purchase' },
+        { id: 'RP', name: 'Recibo de Pago', endpoint: 'documents', type: 'purchase' }
+      ]
+    },
+    {
+      id: 'sale',
+      name: 'Documentos de Venta',
+      types: [
+        { id: 'FV', name: 'Factura de Venta', endpoint: 'documents', type: 'sale' },
+        { id: 'NC', name: 'Nota Crédito', endpoint: 'documents', type: 'sale' },
+        { id: 'RC', name: 'Recibo de Caja', endpoint: 'documents', type: 'sale' },
+        { id: 'CC', name: 'Comprobante Contable', endpoint: 'documents', type: 'sale' }
+      ]
+    }
   ];
+
+  // Flatten document types for the select component
+  const documentTypes = documentCategories.flatMap(category => category.types);
 
   const [selectedType, setSelectedType] = useState<string>('FC');
   const [loading, setLoading] = useState(false);
@@ -225,28 +244,35 @@ function ClientSideConsultarFacturas() {
       
       console.log(`Fetching ${selectedDocType.name} from Siigo API...`);
       
-      // Build query parameters
-      const params = new URLSearchParams({
-        type: selectedType, // This will be used in the API route to determine the document type
-        page: '1',
-        pageSize: '100',
-        includeDependencies: 'true'
-      });
-
-      // Make the API call to the documents endpoint with the type parameter
-      const endpoint = `/api/siigo/documents?${params.toString()}`;
-      console.log('API Endpoint:', endpoint);
+      let endpoint = '';
+      let response;
       
-      const response = await fetch(endpoint);
+      if (selectedDocType.type === 'sale') {
+        // Usar el endpoint específico para facturas de venta
+        endpoint = `/api/siigo/invoices/${selectedDocType.id.toLowerCase()}`;
+        console.log('API Endpoint (sale):', endpoint);
+        response = await fetch(endpoint);
+      } else {
+        // Para facturas de compra y otros documentos
+        const params = new URLSearchParams({
+          type: selectedType,
+          page: '1',
+          pageSize: '100',
+          includeDependencies: 'true'
+        });
+        endpoint = `/api/siigo/documents?${params.toString()}`;
+        console.log('API Endpoint (purchase):', endpoint);
+        response = await fetch(endpoint);
+      }
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error('Error response:', errorData);
-        throw new Error(errorData.error || 'Error al cargar las facturas de Siigo');
+        throw new Error(errorData.error || `Error al cargar ${selectedDocType.name} de Siigo`);
       }
       
       const result = await response.json();
-      console.log('Invoices API Response:', result);
+      console.log('API Response:', result);
       
       // Process the response
       if (!result.success) {
@@ -589,7 +615,7 @@ function ClientSideConsultarFacturas() {
     );
   };
 
-  // Function to search invoices with authentication
+  // Function to search documents with authentication
   const handleSearch = useCallback(async () => {
     if (authLoading || !selectedType) return;
     
@@ -597,16 +623,29 @@ function ClientSideConsultarFacturas() {
       setSearching(true);
       setError(null);
       
-      // Build query parameters
+      // Encontrar el tipo de documento seleccionado
+      const selectedDocType = documentTypes.find(doc => doc.id === selectedType);
+      if (!selectedDocType) {
+        throw new Error('Tipo de documento no encontrado');
+      }
+      
+      // Construir parámetros de consulta
       const params = new URLSearchParams({
-        type: selectedType, // Use the selected document type directly
         page: '1',
         pageSize: '100',
         includeDependencies: 'true'
       });
       
-      // Usar el endpoint de documents
-      const endpoint = `/api/siigo/documents`;
+      // Si es un tipo específico de factura de venta, agregar el parámetro documentType
+      if (selectedDocType.documentType) {
+        params.append('documentType', selectedDocType.documentType);
+      } else {
+        // Para tipos de documento estándar, usar el type
+        params.append('type', selectedDocType.id);
+      }
+      
+      // Usar el endpoint correspondiente según el tipo de documento
+      const endpoint = `/api/siigo/${selectedDocType.endpoint}`;
       const result = await fetchWithAuth(`${endpoint}?${params.toString()}`);
       
       if (!result || result.success === false) {
@@ -845,14 +884,24 @@ function ClientSideConsultarFacturas() {
                   onValueChange={setSelectedType}
                   disabled={loading}
                 >
-                  <SelectTrigger className="w-[250px]">
+                  <SelectTrigger className="w-[300px]">
                     <SelectValue placeholder="Seleccione un tipo de documento" />
                   </SelectTrigger>
                   <SelectContent>
-                    {documentTypes.map((type) => (
-                      <SelectItem key={type.id} value={type.id}>
-                        {type.name}
-                      </SelectItem>
+                    {documentCategories.map((category) => (
+                      <div key={category.id}>
+                        <div className="px-2 py-1.5 text-sm font-medium text-muted-foreground">
+                          {category.name}
+                        </div>
+                        {category.types.map((type) => (
+                          <SelectItem key={type.id} value={type.id} className="pl-6">
+                            {type.name}
+                          </SelectItem>
+                        ))}
+                        {category.id !== documentCategories[documentCategories.length - 1].id && (
+                          <div className="h-px bg-border my-1" />
+                        )}
+                      </div>
                     ))}
                   </SelectContent>
                 </Select>

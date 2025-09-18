@@ -24,21 +24,39 @@ export async function GET(request: Request) {
     // 🔀 Mapear tipo de documento → endpoint
     let apiUrl: URL;
     switch (documentType) {
-      case 'FC': // 👈 Facturas de compra
+      case 'FC': // Facturas de compra
         apiUrl = new URL(`${SIIGO_BASE_URL}/purchases`);
         apiUrl.searchParams.append('document_type', 'FC');
         break;
-      case 'ND':
-        apiUrl = new URL(`${SIIGO_BASE_URL}/debit-notes`);
+      case 'ND': // Notas débito
+        apiUrl = new URL(`${SIIGO_BASE_URL}/purchases`);
+        apiUrl.searchParams.append('document_type', 'ND');
         break;
-      case 'DS':
-        apiUrl = new URL(`${SIIGO_BASE_URL}/support-documents`);
+      case 'DS': // Documentos de soporte
+        apiUrl = new URL(`${SIIGO_BASE_URL}/purchases`);
+        apiUrl.searchParams.append('document_type', 'DS');
         break;
-      case 'RP':
+      case 'RP': // Recibos de pago
         apiUrl = new URL(`${SIIGO_BASE_URL}/payment-receipts`);
+        // No se necesita parámetro type ya que el endpoint es específico para recibos de pago
         break;
-      default: // 👈 Facturas de venta
+      case 'FV': // Facturas de venta
         apiUrl = new URL(`${SIIGO_BASE_URL}/invoices`);
+        break;
+      case 'NC': // Notas crédito
+        apiUrl = new URL(`${SIIGO_BASE_URL}/credit-notes`);
+        break;
+      case 'RC': // Recibos de caja
+        apiUrl = new URL(`${SIIGO_BASE_URL}/cash-receipts`);
+        break;
+      case 'CC': // Comprobantes contables
+        apiUrl = new URL(`${SIIGO_BASE_URL}/accounting-entries`);
+        break;
+      default:
+        return NextResponse.json(
+          { error: `Tipo de documento no soportado: ${documentType}` },
+          { status: 400 }
+        );
     }
 
     // Paginación

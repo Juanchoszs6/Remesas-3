@@ -181,7 +181,7 @@ export function Autocomplete({
           readOnly={readOnlyInput || disabled}
           disabled={disabled}
           style={readOnlyInput && !disabled ? { cursor: 'pointer', background: '#f3f4f6' } : undefined}
-          className={disabled ? 'opacity-70 cursor-not-allowed' : ''}
+          className={disabled ? 'opacity-70 cursor-not-allowe ' : ''}
         />
         {isLoading && (
           <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
@@ -206,7 +206,7 @@ export function Autocomplete({
                     ${option.precio_base.toLocaleString("es-CO")} COP
                   </div>
                 )}
-              </div>
+              </div>                                          
             ))}
           </div>
         </Card>
