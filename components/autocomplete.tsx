@@ -12,6 +12,13 @@ export interface AutocompleteOption {
   nombre: string
   precio_base?: number
   tiene_iva?: boolean
+  direccion?: string
+  ciudad?: string
+  telefono?: string
+  correo_electronico?: string
+  tipo_documento?: string
+  nombre_comercial?: string
+  branch_office?: number
 }
 
 interface AutocompleteProps {
