@@ -194,10 +194,10 @@ function ClientSideConsultarFacturas() {
       id: 'sale',
       name: 'Documentos de Venta',
       types: [
-        { id: 'FV', name: 'Factura de Venta', endpoint: 'documents', type: 'sale' },
-        { id: 'NC', name: 'Nota Crédito', endpoint: 'documents', type: 'sale' },
-        { id: 'RC', name: 'Recibo de Caja', endpoint: 'documents', type: 'sale' },
-        { id: 'CC', name: 'Comprobante Contable', endpoint: 'documents', type: 'sale' }
+        { id: 'FV', name: 'Factura de Venta', endpoint: 'invoices', type: 'sale' },
+        { id: 'NC', name: 'Nota Crédito', endpoint: 'invoices', type: 'sale' },
+        { id: 'RC', name: 'Recibo de Caja', endpoint: 'vouchers', type: 'sale' },
+        { id: 'CC', name: 'Comprobante Contable', endpoint: 'invoices', type: 'sale' }
       ]
     }
   ];
@@ -247,23 +247,29 @@ function ClientSideConsultarFacturas() {
       let endpoint = '';
       let response;
       
-      if (selectedDocType.type === 'sale') {
-        // Usar el endpoint específico para facturas de venta
-        endpoint = `/api/siigo/invoices/${selectedDocType.id.toLowerCase()}`;
-        console.log('API Endpoint (sale):', endpoint);
-        response = await fetch(endpoint);
+      // Construir URL base según el tipo de documento
+      const baseUrl = '/api/siigo';
+      const params = new URLSearchParams({
+        page: '1',
+        pageSize: '100',
+      });
+      
+      // Determinar el endpoint basado en el tipo de documento
+      if (selectedDocType.endpoint === 'vouchers') {
+        // Para Recibos de Caja (RC)
+        endpoint = `${baseUrl}/vouchers?${params.toString()}`;
+      } else if (selectedDocType.endpoint === 'invoices') {
+        // Para Facturas de Venta y Notas Crédito
+        endpoint = `${baseUrl}/invoices/${selectedDocType.id.toLowerCase()}`;
       } else {
-        // Para facturas de compra y otros documentos
-        const params = new URLSearchParams({
-          type: selectedType,
-          page: '1',
-          pageSize: '100',
-          includeDependencies: 'true'
-        });
-        endpoint = `/api/siigo/documents?${params.toString()}`;
-        console.log('API Endpoint (purchase):', endpoint);
-        response = await fetch(endpoint);
+        // Para documentos de compra y otros
+        params.append('type', selectedType);
+        params.append('includeDependencies', 'true');
+        endpoint = `${baseUrl}/documents?${params.toString()}`;
       }
+      
+      console.log('API Endpoint:', endpoint);
+      response = await fetch(endpoint);
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -530,7 +536,7 @@ function ClientSideConsultarFacturas() {
                         className="h-9 w-9 rounded-full hover:bg-primary/10 hover:text-primary transition-colors group relative"
                         onClick={() => {
                           setSelectedInvoice(invoice);
-                          setIsViewerOpen(true);
+                                  setIsViewerOpen(true);
                         }}
                         title="Ver detalles de la factura"
                       >
@@ -636,11 +642,12 @@ function ClientSideConsultarFacturas() {
         includeDependencies: 'true'
       });
       
-      // Si es un tipo específico de factura de venta, agregar el parámetro documentType
-      if (selectedDocType.documentType) {
-        params.append('documentType', selectedDocType.documentType);
+      // Para facturas de venta, usar el ID como documentType
+      // Para documentos de compra, usar el type con el ID
+      if (selectedDocType.type === 'sale') {
+        params.append('documentType', selectedDocType.id);
       } else {
-        // Para tipos de documento estándar, usar el type
+        // Para tipos de documento estándar, usar el type con el ID
         params.append('type', selectedDocType.id);
       }
       
